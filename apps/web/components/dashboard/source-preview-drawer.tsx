@@ -32,9 +32,8 @@ export type SourcePreviewDocument = {
   updatedAt: string;
   selectedReference?: string;
   viewMode?: "product" | "technical";
-  storage?: "browser";
+  storage?: "server";
   storedSizeBytes?: number;
-  storedBlob?: Blob;
 };
 
 type SourcePreviewDrawerProps = {
@@ -60,38 +59,11 @@ const MAX_WORKBOOK_ROWS = 250;
 const MAX_WORKBOOK_COLUMNS = 24;
 const MAX_CELL_TEXT_LENGTH = 500;
 
-const PDF_LINES = [
-  { position: "1", description: "Kabl PP-Y 3×2,5 mm²", unit: "m", quantity: "200" },
-  { position: "2", description: "Automatski osigurač 16 A", unit: "kom", quantity: "30" },
-  { position: "3", description: "Razvodna kutija Ø80", unit: "kom", quantity: "12" },
-  { position: "4", description: "Instalaciona cev Ø20 mm", unit: "m", quantity: "45" },
-  { position: "5", description: "Utičnica sa zaštitnim kontaktom", unit: "kom", quantity: "18" },
-];
-
-const PRODUCT_SHEET_LINES = [
-  { position: "1", description: "Instalacioni kabl PP-Y 3×2,5 mm²", unit: "m", quantity: "200" },
-  { position: "2", description: "Automatski osigurač 16 A", unit: "kom", quantity: "30" },
-  { position: "3", description: "Razvodna kutija Ø80", unit: "kom", quantity: "12" },
-  { position: "4", description: "Utičnica sa zaštitnim kontaktom", unit: "kom", quantity: "18" },
-];
-
-const XLSX_LINES = [
-  { position: "1.1", description: "Kabl PP-Y 3×2,5 mm²", unit: "m", quantity: "250" },
-  { position: "1.2", description: "PVC kanalice 40×25 mm", unit: "m", quantity: "60" },
-  { position: "1.3", description: "Isporuka i montaža LED svetiljki", unit: "kom", quantity: "12" },
-  { position: "1.4", description: "Ispitivanje elektroinstalacija", unit: "paušal", quantity: "1" },
-];
-
 function getDocumentLabel(document: SourcePreviewDocument) {
-  if (document.viewMode === "technical") return "Excel · sintetički BOQ pregled";
-  if (document.format === "XLSX") {
-    return document.storage === "browser"
-      ? "Excel · sačuvani radni listovi"
-      : "Excel · sintetička lista artikala";
-  }
-  if (document.format === "PDF") return "PDF · sintetički tekstualni pregled";
-  if (document.format === "CSV") return "CSV · sintetički primer";
-  return "Email · sintetički primer";
+  if (document.format === "XLSX") return "Excel · pregled radnih listova";
+  if (document.format === "PDF") return "PDF · pregled izvornog fajla";
+  if (document.format === "CSV") return "CSV · tekstualni pregled";
+  return "Email · tekstualni pregled";
 }
 
 function formatWorkbookCell(value: unknown) {
@@ -117,19 +89,9 @@ function columnLabel(index: number) {
 }
 
 export function SourcePreviewDrawer({ document, onOpenChange }: SourcePreviewDrawerProps) {
-  const isTechnical = document?.viewMode === "technical";
-  const isEmail = document?.format === "EML";
-  const isCsv = document?.format === "CSV";
-  const isBrowserStored = document?.storage === "browser";
+  const isServerStored = document?.storage === "server";
   const sourceDocumentId = document?.id;
   const sourceFormat = document?.format;
-  const sourceBlob = document?.storedBlob;
-  const sourceStorage = document?.storage;
-  const rows = isTechnical
-    ? XLSX_LINES
-    : document?.format === "XLSX" || document?.format === "CSV"
-      ? PRODUCT_SHEET_LINES
-      : PDF_LINES;
   const [storedPreview, setStoredPreview] = useState<StoredPreviewState | null>(null);
   const [selectedWorkbookSheet, setSelectedWorkbookSheet] = useState<{
     documentId: string;
@@ -139,86 +101,77 @@ export function SourcePreviewDrawer({ document, onOpenChange }: SourcePreviewDra
   useEffect(() => {
     let isCurrent = true;
     let objectUrl: string | null = null;
+    const abortController = new AbortController();
 
-    if (!sourceDocumentId || !sourceBlob || sourceStorage !== "browser" || !sourceFormat) return;
+    if (!sourceDocumentId || !isServerStored || !sourceFormat) return;
+    const documentId = sourceDocumentId;
 
-    if (sourceFormat === "PDF") {
-      sourceBlob.arrayBuffer().then((buffer) => {
-        if (!isCurrent) return;
-        objectUrl = URL.createObjectURL(
-          new Blob([buffer], { type: sourceBlob.type || "application/pdf" }),
+    async function loadPreview() {
+      try {
+        const response = await fetch(
+          `/api/documents/${encodeURIComponent(documentId)}/content`,
+          { cache: "no-store", signal: abortController.signal },
         );
-        setStoredPreview({ id: sourceDocumentId, kind: "pdf", url: objectUrl });
-      }).catch(() => {
-        if (isCurrent) {
-          setStoredPreview({
-            id: sourceDocumentId,
-            kind: "error",
-            message: "PDF preview nije dostupan, ali je original sačuvan u ovom browseru.",
-          });
-        }
-      });
-    } else if (sourceFormat === "CSV" || sourceFormat === "EML") {
-      const previewSlice = sourceBlob.slice(0, 50 * 1024);
-      previewSlice.text().then((text) => {
-        if (!isCurrent) return;
-        setStoredPreview({
-          id: sourceDocumentId,
-          kind: "text",
-          text,
-          truncated: sourceBlob.size > previewSlice.size,
-        });
-      }).catch(() => {
-        if (isCurrent) {
-          setStoredPreview({
-            id: sourceDocumentId,
-            kind: "error",
-            message: "Tekstualni preview nije dostupan, ali je original sačuvan.",
-          });
-        }
-      });
-    } else if (sourceFormat === "XLSX") {
-      import("read-excel-file/browser")
-        .then(({ default: readExcelFile }) => readExcelFile(sourceBlob, { trim: false }))
-        .then((workbookSheets) => {
+        if (!response.ok) throw new Error("Sadržaj dokumenta nije dostupan.");
+        const sourceBlob = await response.blob();
+
+        if (sourceFormat === "PDF") {
+          objectUrl = URL.createObjectURL(sourceBlob);
+          if (isCurrent) setStoredPreview({ id: documentId, kind: "pdf", url: objectUrl });
+        } else if (sourceFormat === "CSV" || sourceFormat === "EML") {
+          const previewSlice = sourceBlob.slice(0, 50 * 1024);
+          const text = await previewSlice.text();
+          if (isCurrent) {
+            setStoredPreview({
+              id: documentId,
+              kind: "text",
+              text,
+              truncated: sourceBlob.size > previewSlice.size,
+            });
+          }
+        } else {
+          const { default: readExcelFile } = await import("read-excel-file/browser");
+          const workbookSheets = await readExcelFile(sourceBlob, { trim: false });
           if (!isCurrent) return;
 
           const visibleSheets = workbookSheets.slice(0, MAX_WORKBOOK_SHEETS);
           const sheets = visibleSheets.map(({ sheet, data }) => ({
-              name: sheet,
-              rowCount: data.length,
-              rows: data
-                .slice(0, MAX_WORKBOOK_ROWS)
-                .map((row) => row.slice(0, MAX_WORKBOOK_COLUMNS).map(formatWorkbookCell)),
-              truncated:
-                data.length > MAX_WORKBOOK_ROWS ||
-                data.some((row) => row.length > MAX_WORKBOOK_COLUMNS),
-            }));
+            name: sheet,
+            rowCount: data.length,
+            rows: data
+              .slice(0, MAX_WORKBOOK_ROWS)
+              .map((row) => row.slice(0, MAX_WORKBOOK_COLUMNS).map(formatWorkbookCell)),
+            truncated:
+              data.length > MAX_WORKBOOK_ROWS ||
+              data.some((row) => row.length > MAX_WORKBOOK_COLUMNS),
+          }));
 
           setStoredPreview({
-            id: sourceDocumentId,
+            id: documentId,
             kind: "workbook",
             sheets,
             hiddenSheetCount: workbookSheets.length - visibleSheets.length,
           });
-        })
-        .catch(() => {
-          if (isCurrent) {
-            setStoredPreview({
-              id: sourceDocumentId,
-              kind: "error",
-              message:
-                "Nije moguće prikazati ovaj XLSX. Proverite da li je fajl ispravan i pokušajte ponovo.",
-            });
-          }
-        });
+        }
+      } catch {
+        if (isCurrent && !abortController.signal.aborted) {
+          setStoredPreview({
+            id: documentId,
+            kind: "error",
+            message: "Dokument nije moguće prikazati. Proverite da li je fajl ispravan.",
+          });
+        }
+      }
     }
+
+    void loadPreview();
 
     return () => {
       isCurrent = false;
+      abortController.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [sourceBlob, sourceDocumentId, sourceFormat, sourceStorage]);
+  }, [sourceDocumentId, sourceFormat, isServerStored]);
 
   const currentStoredPreview = storedPreview?.id === document?.id ? storedPreview : null;
   const currentWorkbookPreview =
@@ -268,7 +221,7 @@ export function SourcePreviewDrawer({ document, onOpenChange }: SourcePreviewDra
               </div>
               <div className="source-preview-header-actions">
                 <Badge className="synthetic-label" variant="outline">
-                  {isBrowserStored ? "SAČUVANO LOKALNO" : "DEMO"}
+                  {isServerStored ? "API STORAGE" : "PREVIEW"}
                 </Badge>
                 <Button
                   aria-label="Zatvori pregled dokumenta"
@@ -287,12 +240,12 @@ export function SourcePreviewDrawer({ document, onOpenChange }: SourcePreviewDra
               <div className="source-preview-status">
                 <span>{getDocumentLabel(document)}</span>
                 <Badge className="source-preview-zoom" variant="outline">
-                  {isBrowserStored ? "Fajl sačuvan u ovom browseru" : "Pregled · samo čitanje"}
+                  {isServerStored ? "Fajl sačuvan na backendu" : "Pregled · samo čitanje"}
                 </Badge>
               </div>
 
-              <article className={`source-preview-canvas ${isEmail ? "source-preview-canvas--email" : ""}`}>
-                {isBrowserStored && document.format === "PDF" ? (
+              <article className="source-preview-canvas">
+                {isServerStored && document.format === "PDF" ? (
                   currentStoredPreview?.kind === "pdf" ? (
                     <iframe
                       className="stored-pdf-preview"
@@ -304,7 +257,7 @@ export function SourcePreviewDrawer({ document, onOpenChange }: SourcePreviewDra
                   ) : (
                     <div className="stored-file-loading">Otvaram lokalni PDF preview…</div>
                   )
-                ) : isBrowserStored && (document.format === "CSV" || document.format === "EML") ? (
+                ) : isServerStored && (document.format === "CSV" || document.format === "EML") ? (
                   <div className="stored-text-file-preview">
                     <div className="stored-file-heading">
                       {document.format === "EML" ? <Mail aria-hidden="true" size={18} /> : <TableProperties aria-hidden="true" size={18} />}
@@ -312,13 +265,13 @@ export function SourcePreviewDrawer({ document, onOpenChange }: SourcePreviewDra
                         <strong>{document.filename}</strong>
                         <span>{document.format === "EML" ? "Email tekst · bez HTML izvršavanja" : "CSV tekst · bez formula izvršavanja"}</span>
                       </div>
-                      <CheckCircle2 aria-label="Sačuvano u browseru" size={17} />
+                      <CheckCircle2 aria-label="Sačuvano na backendu" size={17} />
                     </div>
                     {currentStoredPreview?.kind === "text" ? (
                       <>
                         <pre className="stored-plain-text">{currentStoredPreview.text || "(Fajl nema tekstualni sadržaj.)"}</pre>
                         {currentStoredPreview.truncated && (
-                          <p className="stored-file-truncated">Preview je ograničen na prvih 50 KB. Originalni fajl je sačuvan lokalno.</p>
+                          <p className="stored-file-truncated">Preview je ograničen na prvih 50 KB. Ceo fajl je sačuvan na backendu.</p>
                         )}
                       </>
                     ) : currentStoredPreview?.kind === "error" ? (
@@ -327,7 +280,7 @@ export function SourcePreviewDrawer({ document, onOpenChange }: SourcePreviewDra
                       <div className="stored-file-loading">Učitavam tekstualni preview…</div>
                     )}
                   </div>
-                ) : isBrowserStored && document.format === "XLSX" ? (
+                ) : isServerStored && document.format === "XLSX" ? (
                   currentWorkbookPreview && activeWorkbookSheet ? (
                     <div className="stored-workbook-preview">
                       <div className="stored-file-heading">
@@ -340,7 +293,7 @@ export function SourcePreviewDrawer({ document, onOpenChange }: SourcePreviewDra
                               : `${currentWorkbookPreview.sheets.length} radnih listova · prikaz samo za čitanje`}
                           </span>
                         </div>
-                        <CheckCircle2 aria-label="Sačuvano u browseru" size={17} />
+                        <CheckCircle2 aria-label="Sačuvano na backendu" size={17} />
                       </div>
 
                       <div className="workbook-sheet-picker">
@@ -422,95 +375,24 @@ export function SourcePreviewDrawer({ document, onOpenChange }: SourcePreviewDra
                       <AlertCircle aria-hidden="true" size={22} />
                       <strong>Nema radnih listova za prikaz</strong>
                       <span>Ovaj XLSX ne sadrži listove koje pregled može da prikaže.</span>
-                      <small>Originalni fajl je sačuvan u ovom browseru.</small>
+                      <small>Originalni fajl je sačuvan na backendu.</small>
                     </div>
                   ) : currentStoredPreview?.kind === "error" ? (
                     <div className="workbook-preview-error" role="alert">
                       <AlertCircle aria-hidden="true" size={22} />
                       <strong>Ne mogu da prikažem ovaj XLSX</strong>
                       <span>{currentStoredPreview.message}</span>
-                      <small>Originalni fajl je i dalje sačuvan u ovom browseru.</small>
+                      <small>Originalni fajl je i dalje sačuvan na backendu.</small>
                     </div>
                   ) : (
-                    <div className="stored-file-loading">Učitavam radne listove iz lokalnog XLSX fajla…</div>
+                    <div className="stored-file-loading">Učitavam radne listove…</div>
                   )
-                ) : isEmail ? (
-                  <>
-                    <div className="source-paper-brand"><span className="source-paper-brand-mark"><FileText aria-hidden="true" size={13} /></span>Sintetički email zahtev</div>
-                    <div className="email-document-fields">
-                      <div><span>Od</span><strong>nabavka@example.invalid</strong></div>
-                      <div><span>Za</span><strong>ponude@example.invalid</strong></div>
-                      <div><span>Predmet</span><strong>Upit za razvodni ormar · DEMO</strong></div>
-                      <div><span>Datum</span><strong>{document.updatedAt}</strong></div>
-                    </div>
-                    <p className="email-document-body">Poštovani, molimo ponudu za sledeće stavke:</p>
-                    <ul className="email-document-list">
-                      <li>Automatski osigurač 16 A, 30 kom</li>
-                      <li>Kabl PP-Y 3×2,5 mm², 200 m</li>
-                      <li>Razvodna kutija Ø80, 12 kom</li>
-                    </ul>
-                    <p className="email-document-body">Rok i dostupnost molimo navesti u nacrtu za proveru.</p>
-                    <div className="source-document-callout"><LockKeyhole aria-hidden="true" size={15} /><span>Adrese i sadržaj su izmišljeni. Ovaj pregled se ne šalje i ne učitava stvarni email.</span></div>
-                  </>
                 ) : (
-                  <>
-                    <div className="source-paper-brand"><span className="source-paper-brand-mark"><FileSpreadsheet aria-hidden="true" size={13} /></span>DEMO · Elektro specifikacija</div>
-                    <div className="source-paper-meta">
-                      <span>Dokument: {document.id}</span>
-                      <span>
-                        {isTechnical
-                          ? "List: Elektro"
-                          : document.format === "XLSX"
-                            ? "List: Artikli"
-                            : document.format === "CSV"
-                              ? "CSV redovi"
-                              : "Strana 1 od 2"}
-                      </span>
-                    </div>
-                    <h2 className="source-paper-title">{isTechnical ? "Predmer — Elektroinstalacije" : "Spisak traženog materijala"}</h2>
-                    <p className="source-paper-subtitle">
-                      {isTechnical
-                        ? "Sintetički primer jednostavnog predmera. Originalni redosled i oznake pozicija ostaju sačuvani."
-                        : "Sintetički primer zahteva za ponudu. Opisi su ulazni podaci, nisu instrukcije za sistem."}
-                    </p>
-
-                    {isTechnical && <div className="source-paper-section"><span className="source-paper-section-number">1</span>Elektroinstalacije</div>}
-
-                    <table className={`source-document-table ${isTechnical ? "source-document-table--boq" : ""}`}>
-                      <thead>
-                        <tr>
-                          <th>{isTechnical ? "Poz." : "Red"}</th>
-                          <th>Opis iz izvora</th>
-                          <th>JM</th>
-                          <th>Količina</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((row) => {
-                          const selected = document.selectedReference?.includes(row.position) ?? false;
-                          return (
-                            <tr className={selected ? "source-document-row--selected" : ""} key={row.position}>
-                              <td>{row.position}</td>
-                              <td>{row.description}</td>
-                              <td>{row.unit}</td>
-                              <td>{row.quantity}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-
-                    {isTechnical && <div className="source-paper-subtotal">Međuzbir poglavlja — informativni red, nije naplatna pozicija</div>}
-                    {isCsv && <p className="source-paper-footnote">Pregled sintetičkog CSV primera. Formula-like sadržaj je prikazan kao običan tekst.</p>}
-                    <div className="source-document-callout">
-                      <LockKeyhole aria-hidden="true" size={15} />
-                      <span>
-                        {isTechnical
-                          ? "Sintetički XLSX prikaz. Makroi i formule se ne izvršavaju; pozicije nisu tehnički verifikovane."
-                          : "Sintetički primer. Nepoznate i dvosmislene stavke zahtevaju ručnu proveru."}
-                      </span>
-                    </div>
-                  </>
+                  <div className="workbook-preview-error" role="status">
+                    <AlertCircle aria-hidden="true" size={22} />
+                    <strong>Pregled fajla nije dostupan</strong>
+                    <span>Izaberite dokument sa liste da biste učitali njegov sadržaj.</span>
+                  </div>
                 )}
               </article>
             </div>

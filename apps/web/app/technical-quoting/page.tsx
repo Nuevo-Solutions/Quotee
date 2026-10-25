@@ -1,13 +1,12 @@
 import type { Metadata } from "next";
 
-import { TechnicalQuotingDashboard } from "@/components/dashboard/technical-quoting-dashboard";
+import { TechnicalQuotingPage as TechnicalQuotingModulePage } from "@/components/dashboard/technical-quoting-page";
 
 export const metadata: Metadata = {
   title: "Technical Quoting | Inbox-to-Quote",
-  description:
-    "Sintetički demo predmera, pozicija, radova i usluga u Technical Quoting toku.",
+  description: "Upload i pregled XLSX predmera u Technical Quoting toku.",
 };
 
 export default function TechnicalQuotingPage() {
-  return <TechnicalQuotingDashboard />;
+  return <TechnicalQuotingModulePage />;
 }

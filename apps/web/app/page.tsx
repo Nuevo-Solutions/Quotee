@@ -1,5 +1,5 @@
-import { ProductQuotingDashboard } from "@/components/dashboard/product-quoting-dashboard";
+import { ProductQuotingPage } from "@/components/dashboard/product-quoting-page";
 
 export default function Home() {
-  return <ProductQuotingDashboard />;
+  return <ProductQuotingPage />;
 }

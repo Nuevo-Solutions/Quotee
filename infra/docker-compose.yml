@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ai_inbox_to_quote
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: local_dev_only
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ai_inbox_to_quote"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: ai-inbox-to-quote-api:dev
+    build:
+      context: ../services/api
+      target: dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../services/api:/srv/www
+      - document_files:/var/lib/ai-inbox-to-quote/documents
+    environment:
+      APP_NAME: AI Inbox-to-Quote API
+      ENVIRONMENT: local
+      DATABASE_URL: postgresql+asyncpg://postgres:local_dev_only@postgres:5432/ai_inbox_to_quote
+      DOCUMENT_STORAGE_PATH: /var/lib/ai-inbox-to-quote/documents
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  document_files:

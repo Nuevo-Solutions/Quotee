@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import {
   BarChart3,
-  Bell,
   Building2,
   CalendarDays,
   ChevronDown,
@@ -30,13 +29,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Separator } from "@/components/ui/separator";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-
 type DashboardModule = "product" | "technical";
 
 type DashboardShellProps = {
@@ -67,12 +59,9 @@ export function DashboardShell({
 }: DashboardShellProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
-  const isTechnical = activeModule === "technical";
-  const workspaceName = isTechnical
-    ? "Demo Elektro Montaža"
-    : "Demo Elektro Distribucija";
-  const currentPageLabel = isTechnical ? "Predmeri" : "Zahtevi";
-  const moduleNavigation = isTechnical
+  const workspaceName = "Lokalni workspace";
+  const currentPageLabel = activeModule === "technical" ? "Predmeri" : "Zahtevi";
+  const moduleNavigation = activeModule === "technical"
     ? [
         { label: "Predmeri", Icon: ClipboardList, active: true },
         { label: "Cenovnik rada i usluga", Icon: FileText, active: false },
@@ -118,7 +107,7 @@ export function DashboardShell({
               <small>pilot workspace</small>
             </span>
           </Link>
-          <span className="brand-demo-label">DEMO</span>
+          <span className="brand-demo-label">LOCAL</span>
           <button
             aria-label="Zatvori navigaciju"
             className="sidebar-mobile-close"
@@ -132,7 +121,7 @@ export function DashboardShell({
         <button
           aria-label={`Radni prostor: ${workspaceName}`}
           className="workspace-switcher"
-          onClick={() => setToastMessage("Aktivan je sintetički demo radni prostor.")}
+          onClick={() => setToastMessage("Aktivno je lokalno razvojno okruženje.")}
           type="button"
         >
           <span className="workspace-icon">
@@ -169,7 +158,7 @@ export function DashboardShell({
 
           <div className="sidebar-nav-group">
             <span className="sidebar-section-label">
-              {isTechnical ? "Technical Quoting" : "Product Quoting"}
+              {activeModule === "technical" ? "Technical Quoting" : "Product Quoting"}
             </span>
             {moduleNavigation.map(({ label, Icon, active }) => (
               <button
@@ -199,15 +188,15 @@ export function DashboardShell({
 
         <div className="sidebar-bottom">
           <div className="pilot-card">
-            <span className="pilot-card-kicker">Pilot okvir</span>
+            <span className="pilot-card-kicker">Lokalni storage</span>
             <div className="pilot-card-title">
               <Sparkles aria-hidden="true" size={15} />
-              Jedan izabrani tok
+              Backend upload
             </div>
-            <p>Jedna firma · do 100 dokumenata · do 3 korisnika.</p>
+            <p>Dokumenti se čuvaju u lokalnom API volume-u.</p>
             <div className="pilot-card-status">
               <span className="status-live-dot" />
-              Sintetičko okruženje
+              Bez obrade i tenant izolacije
             </div>
           </div>
 
@@ -216,13 +205,13 @@ export function DashboardShell({
               <AvatarFallback>DM</AvatarFallback>
             </Avatar>
             <div className="sidebar-user-copy">
-              <strong>Demo korisnik</strong>
-              <span>{isTechnical ? "Kalkulant" : "Komercijalista"}</span>
+              <strong>Lokalni korisnik</strong>
+              <span>{activeModule === "technical" ? "Kalkulant" : "Komercijalista"}</span>
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
-                  aria-label="Otvori demo korisnički meni"
+                  aria-label="Otvori korisnički meni"
                   className="sidebar-user-menu-trigger"
                   size="icon-sm"
                   variant="ghost"
@@ -231,15 +220,15 @@ export function DashboardShell({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="account-menu">
-                <DropdownMenuLabel>Demo korisnik</DropdownMenuLabel>
+                <DropdownMenuLabel>Lokalni korisnik</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onSelect={() => setToastMessage("Profil nije povezan sa nalogom.")}
+                  onSelect={() => setToastMessage("Autentikacija nije uključena u lokalnom okruženju.")}
                 >
-                  Profil naloga (demo)
+                  Profil naloga
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onSelect={() => setToastMessage("Podešavanja nisu uključena u ovaj prototip.")}
+                  onSelect={() => setToastMessage("Podešavanja nisu dostupna u lokalnom okruženju.")}
                 >
                   Podešavanja
                 </DropdownMenuItem>
@@ -271,35 +260,20 @@ export function DashboardShell({
           <div className="topbar-right">
             <span className="demo-workspace-pill">
               <span className="status-live-dot" />
-              Demo okruženje
+              Lokalno okruženje
             </span>
             <span className="date-pill topbar-date">
               <CalendarDays aria-hidden="true" size={14} />
-              23. oktobar 2026.
+              Lokalni API
             </span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label="Obaveštenja — demo prikaz"
-                  className="topbar-icon-button"
-                  onClick={() => setToastMessage("Obaveštenja nisu povezana u demo prikazu.")}
-                  size="icon-sm"
-                  variant="ghost"
-                >
-                  <Bell aria-hidden="true" size={16} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Obaveštenja — demo prikaz</TooltipContent>
-            </Tooltip>
-            <Separator className="topbar-separator" orientation="vertical" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="topbar-profile" type="button">
                   <Avatar className="user-avatar">
-                    <AvatarFallback>DM</AvatarFallback>
+                    <AvatarFallback>LK</AvatarFallback>
                   </Avatar>
                   <span className="topbar-profile-copy">
-                    <strong>Demo korisnik</strong>
+                    <strong>Lokalni korisnik</strong>
                     <span>{workspaceName}</span>
                   </span>
                   <ChevronDown aria-hidden="true" size={14} />
@@ -309,7 +283,7 @@ export function DashboardShell({
                 <DropdownMenuLabel>{workspaceName}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onSelect={() => setToastMessage("Promena organizacije nije uključena u demo.")}
+                  onSelect={() => setToastMessage("Promena radnog prostora nije dostupna lokalno.")}
                 >
                   Promeni radni prostor
                 </DropdownMenuItem>

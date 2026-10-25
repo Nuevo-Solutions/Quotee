@@ -65,9 +65,9 @@ const OFFER_BASIS_OPTIONS: { value: OfferBasis; label: string; help: string }[] 
     help: "Vrsta i cena svake pozicije moraju biti eksplicitno potvrđene.",
   },
   {
-    value: "SUPPLY_ONLY",
-    label: "Mešovita ponuda",
-    help: "Vrsta i cena svake pozicije moraju biti eksplicitno potvrđene.",
+    value: "MIXED",
+    label: "Mešovita ponuda 2",
+    help: "Testiranje",
   },
 ];
 

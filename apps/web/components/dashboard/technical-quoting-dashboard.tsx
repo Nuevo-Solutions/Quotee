@@ -55,17 +55,17 @@ const OFFER_BASIS_OPTIONS: { value: OfferBasis; label: string; help: string }[] 
     help: "Ne dodaje rad ili montažu pozicijama materijala.",
   },
   {
-    value: "SUPPLY_AND_INSTALL",
-    label: "Isporuka i izvođenje radova",
-    help: "Prikazuje materijal, rad i usluge samo iz odobrenih izvora.",
-  },
-  {
     value: "LABOR_ONLY",
     label: "Samo radovi / usluge",
     help: "Ne generiše niti dodaje materijalne stavke.",
   },
   {
     value: "MIXED",
+    label: "Mešovita ponuda",
+    help: "Vrsta i cena svake pozicije moraju biti eksplicitno potvrđene.",
+  },
+  {
+    value: "SUPPLY_ONLY",
     label: "Mešovita ponuda",
     help: "Vrsta i cena svake pozicije moraju biti eksplicitno potvrđene.",
   },

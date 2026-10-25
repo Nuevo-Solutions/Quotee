@@ -89,6 +89,8 @@ export function DashboardShell({
   function showComingSoon(label: string) {
     setMobileMenuOpen(false);
     setToastMessage(`„${label}” je planiran za naredni korak dizajna.`);
+    console.log("Blabla");
+    
   }
 
   return (

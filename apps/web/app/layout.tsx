@@ -10,8 +10,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "Product Quoting | Inbox-to-Quote",
-  description:
-    "Sintetički demo toka Product Quoting za distributere i veleprodaje.",
+  description: "Upload zahteva i lista artikala za Product Quoting.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

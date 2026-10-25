@@ -47,6 +47,13 @@ export async function listDocuments(workflow: DocumentWorkflow): Promise<StoredD
   return readResponse<StoredDocument[]>(response);
 }
 
+export async function getDocument(documentId: string): Promise<StoredDocument> {
+  const response = await fetch(`/api/documents/${encodeURIComponent(documentId)}`, {
+    cache: "no-store",
+  });
+  return readResponse<StoredDocument>(response);
+}
+
 export async function uploadDocument(
   file: File,
   documentType: DocumentType,

@@ -11,6 +11,7 @@ import {
   ChevronRight,
   CircleHelp,
   ClipboardList,
+  Database,
   FileText,
   Inbox,
   Menu,
@@ -29,7 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-type DashboardModule = "product" | "technical";
+type DashboardModule = "product" | "technical" | "catalog";
 
 type DashboardShellProps = {
   activeModule: DashboardModule;
@@ -50,6 +51,12 @@ const MODULES = [
     href: "/technical-quoting",
     Icon: ClipboardList,
   },
+  {
+    id: "catalog" as const,
+    label: "Katalog i izvori",
+    href: "/catalog",
+    Icon: Database,
+  },
 ];
 
 export function DashboardShell({
@@ -60,7 +67,11 @@ export function DashboardShell({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const workspaceName = "Lokalni workspace";
-  const currentPageLabel = activeModule === "technical" ? "Predmeri" : "Zahtevi";
+  const currentPageLabel = activeModule === "technical"
+    ? "Predmeri"
+    : activeModule === "catalog"
+      ? "Katalog i izvori"
+      : "Zahtevi";
   const moduleNavigation = activeModule === "technical"
     ? [
         { label: "Predmeri", Icon: ClipboardList, active: true },
@@ -68,12 +79,14 @@ export function DashboardShell({
         { label: "Predračuni", Icon: Inbox, active: false },
         { label: "Pilot metrike", Icon: BarChart3, active: false },
       ]
-    : [
+    : activeModule === "product"
+      ? [
         { label: "Zahtevi", Icon: Inbox, active: true },
         { label: "Katalog artikala", Icon: Package, active: false },
         { label: "Ponude", Icon: FileText, active: false },
         { label: "Pilot metrike", Icon: BarChart3, active: false },
-      ];
+      ]
+      : [];
 
   function showComingSoon(label: string) {
     setMobileMenuOpen(false);
@@ -156,34 +169,36 @@ export function DashboardShell({
             })}
           </div>
 
-          <div className="sidebar-nav-group">
-            <span className="sidebar-section-label">
-              {activeModule === "technical" ? "Technical Quoting" : "Product Quoting"}
-            </span>
-            {moduleNavigation.map(({ label, Icon, active }) => (
+          {activeModule !== "catalog" && (
+            <div className="sidebar-nav-group">
+              <span className="sidebar-section-label">
+                {activeModule === "technical" ? "Technical Quoting" : "Product Quoting"}
+              </span>
+              {moduleNavigation.map(({ label, Icon, active }) => (
+                <button
+                  aria-current={active ? "page" : undefined}
+                  className={`sidebar-nav-link ${active ? "is-active" : ""}`}
+                  key={label}
+                  onClick={() =>
+                    active ? setMobileMenuOpen(false) : showComingSoon(label)
+                  }
+                  type="button"
+                >
+                  <Icon aria-hidden="true" size={17} />
+                  <span>{label}</span>
+                  {active && <ChevronRight aria-hidden="true" className="nav-current-icon" size={14} />}
+                </button>
+              ))}
               <button
-                aria-current={active ? "page" : undefined}
-                className={`sidebar-nav-link ${active ? "is-active" : ""}`}
-                key={label}
-                onClick={() =>
-                  active ? setMobileMenuOpen(false) : showComingSoon(label)
-                }
+                className="sidebar-nav-link"
+                onClick={() => showComingSoon("Pomoć i podešavanja")}
                 type="button"
               >
-                <Icon aria-hidden="true" size={17} />
-                <span>{label}</span>
-                {active && <ChevronRight aria-hidden="true" className="nav-current-icon" size={14} />}
+                <CircleHelp aria-hidden="true" size={17} />
+                <span>Pomoć i podešavanja</span>
               </button>
-            ))}
-            <button
-              className="sidebar-nav-link"
-              onClick={() => showComingSoon("Pomoć i podešavanja")}
-              type="button"
-            >
-              <CircleHelp aria-hidden="true" size={17} />
-              <span>Pomoć i podešavanja</span>
-            </button>
-          </div>
+            </div>
+          )}
         </nav>
 
         <div className="sidebar-bottom">
@@ -206,7 +221,7 @@ export function DashboardShell({
             </Avatar>
             <div className="sidebar-user-copy">
               <strong>Lokalni korisnik</strong>
-              <span>{activeModule === "technical" ? "Kalkulant" : "Komercijalista"}</span>
+              <span>{activeModule === "technical" ? "Kalkulant" : activeModule === "catalog" ? "Upravljanje podacima" : "Komercijalista"}</span>
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

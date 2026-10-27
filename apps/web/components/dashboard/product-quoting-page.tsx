@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
+import Link from "next/link";
 import {
   AlertCircle,
   CheckCircle2,
@@ -240,7 +241,7 @@ export function ProductQuotingPage() {
                       <div className="request-title-wrap">
                         <span className={`file-type-icon file-type-icon--${document.format.toLowerCase()}`}><FileIcon aria-hidden="true" size={17} /></span>
                         <div className="request-title-copy">
-                          <button className="request-title-button" onClick={() => setSelectedDocument(document)} type="button">{document.original_filename}</button>
+                          <Link className="request-title-button" href={`/documents/${document.id}`}>{document.original_filename}</Link>
                           <span className="request-file-meta">{document.id}</span>
                         </div>
                       </div>

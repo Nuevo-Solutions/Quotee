@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from uuid import UUID
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,6 +15,8 @@ class Settings(BaseSettings):
     app_name: str = "AI Inbox-to-Quote API"
     api_v1_prefix: str = "/api/v1"
     environment: str = "local"
+    local_organization_id: UUID = UUID("00000000-0000-4000-8000-000000000001")
+    local_organization_name: str = "Local development workspace"
     database_url: str = (
         "postgresql+asyncpg://postgres:local_dev_only@localhost:5432/ai_inbox_to_quote"
     )

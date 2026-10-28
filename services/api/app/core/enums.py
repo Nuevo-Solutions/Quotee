@@ -30,6 +30,7 @@ class FileFormat(str, Enum):
 class ProcessingStatus(str, Enum):
     UPLOADED = "UPLOADED"
     PROCESSING = "PROCESSING"
+    MAPPING_REQUIRED = "MAPPING_REQUIRED"
     NEEDS_REVIEW = "NEEDS_REVIEW"
     FAILED = "FAILED"
     UNSUPPORTED_INPUT = "UNSUPPORTED_INPUT"
@@ -59,3 +60,21 @@ class ReviewStatus(str, Enum):
     MISSING_PRICE = "MISSING_PRICE"
     INVALID_INPUT = "INVALID_INPUT"
     MANUALLY_CONFIRMED = "MANUALLY_CONFIRMED"
+
+
+class ConfidenceLevel(str, Enum):
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    NONE = "NONE"
+
+
+class PriceStatus(str, Enum):
+    NOT_CHECKED = "NOT_CHECKED"
+    AVAILABLE = "AVAILABLE"
+    MISSING_PRICE = "MISSING_PRICE"
+
+
+class AvailabilityStatus(str, Enum):
+    NOT_CHECKED = "NOT_CHECKED"
+    UNKNOWN = "UNKNOWN"

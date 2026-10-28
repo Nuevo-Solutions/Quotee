@@ -4,9 +4,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.workspace import ensure_local_organization
 from app.models import (
     CatalogImport,
-    Organization,
     Product,
     ProductAlias,
 )
@@ -16,19 +16,6 @@ from app.schemas.catalog import (
     CatalogProductInput,
     CatalogProductRead,
 )
-
-
-async def _ensure_local_organization(session: AsyncSession, organization_id: UUID) -> None:
-    organization = await session.get(Organization, organization_id)
-    if organization is None:
-        settings = get_settings()
-        session.add(
-            Organization(
-                id=organization_id,
-                name=settings.local_organization_name,
-            )
-        )
-        await session.flush()
 
 
 async def persist_catalog_import(
@@ -43,7 +30,7 @@ async def persist_catalog_import(
     organization_id = get_settings().local_organization_id
 
     async with session.begin():
-        await _ensure_local_organization(session, organization_id)
+        await ensure_local_organization(session)
         current_version = await session.scalar(
             select(func.max(CatalogImport.version)).where(
                 CatalogImport.organization_id == organization_id

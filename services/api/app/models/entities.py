@@ -7,7 +7,9 @@ from uuid import UUID
 from sqlalchemy import (
     JSON,
     Boolean,
+    DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -23,9 +25,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.enums import (
     ApprovalState,
+    AvailabilityStatus,
+    ConfidenceLevel,
     DocumentType,
     ItemType,
     OfferBasis,
+    PriceStatus,
     ProcessingStatus,
     ReviewStatus,
     WorkflowType,
@@ -85,7 +90,15 @@ class CatalogImport(UUIDPrimaryKey, TimestampMixin, Base):
 
 class Product(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "products"
-    __table_args__ = (UniqueConstraint("organization_id", "catalog_import_id", "sku"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "catalog_import_id", "sku"),
+        Index(
+            "ix_products_name_trgm",
+            "name",
+            postgresql_using="gin",
+            postgresql_ops={"name": "gin_trgm_ops"},
+        ),
+    )
 
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), index=True, nullable=False
@@ -104,7 +117,15 @@ class Product(UUIDPrimaryKey, TimestampMixin, Base):
 
 class ProductAlias(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "product_aliases"
-    __table_args__ = (UniqueConstraint("organization_id", "product_id", "alias"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "product_id", "alias"),
+        Index(
+            "ix_product_aliases_alias_trgm",
+            "alias",
+            postgresql_using="gin",
+            postgresql_ops={"alias": "gin_trgm_ops"},
+        ),
+    )
 
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), index=True, nullable=False
@@ -169,6 +190,14 @@ class Document(UUIDPrimaryKey, TimestampMixin, Base):
 
 class ProcessingJob(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "processing_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "document_id",
+            "catalog_import_id",
+            name="uq_processing_jobs_organization_document_catalog",
+        ),
+    )
 
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), index=True, nullable=False
@@ -176,6 +205,7 @@ class ProcessingJob(UUIDPrimaryKey, TimestampMixin, Base):
     document_id: Mapped[UUID] = mapped_column(
         ForeignKey("documents.id", ondelete="CASCADE"), index=True, nullable=False
     )
+    catalog_import_id: Mapped[UUID | None] = mapped_column(ForeignKey("catalog_imports.id"))
     job_type: Mapped[WorkflowType | None] = mapped_column(enum_column(WorkflowType, "job_workflow"))
     status: Mapped[ProcessingStatus] = mapped_column(
         enum_column(ProcessingStatus, "job_processing_status"),
@@ -184,6 +214,15 @@ class ProcessingJob(UUIDPrimaryKey, TimestampMixin, Base):
     )
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(100))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    result_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    mapping_headers: Mapped[list[str] | None] = mapped_column(JSON)
+    mapping_suggestion: Mapped[dict[str, int | None] | None] = mapped_column(JSON)
+    column_mapping: Mapped[dict[str, int | None] | None] = mapped_column(JSON)
+    llm_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    llm_output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SourceSection(UUIDPrimaryKey, TimestampMixin, Base):
@@ -240,6 +279,35 @@ class MatchCandidate(UUIDPrimaryKey, TimestampMixin, Base):
     )
     evidence: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class PositionMatchResult(UUIDPrimaryKey, TimestampMixin, Base):
+    __tablename__ = "position_match_results"
+    __table_args__ = (UniqueConstraint("processing_job_id", "extracted_position_id"),)
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    processing_job_id: Mapped[UUID] = mapped_column(
+        ForeignKey("processing_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    extracted_position_id: Mapped[UUID] = mapped_column(
+        ForeignKey("extracted_positions.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    selected_product_id: Mapped[UUID | None] = mapped_column(ForeignKey("products.id"))
+    match_status: Mapped[ReviewStatus] = mapped_column(
+        enum_column(ReviewStatus, "position_match_status"), nullable=False
+    )
+    confidence: Mapped[ConfidenceLevel] = mapped_column(
+        enum_column(ConfidenceLevel, "match_confidence"), nullable=False
+    )
+    reason_codes: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    price_status: Mapped[PriceStatus] = mapped_column(
+        enum_column(PriceStatus, "match_price_status"), nullable=False
+    )
+    availability_status: Mapped[AvailabilityStatus] = mapped_column(
+        enum_column(AvailabilityStatus, "match_availability_status"), nullable=False
+    )
 
 
 class QuoteDraft(UUIDPrimaryKey, TimestampMixin, Base):

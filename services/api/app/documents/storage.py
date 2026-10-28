@@ -5,9 +5,12 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from fastapi import UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.enums import DocumentType, FileFormat, ProcessingStatus, WorkflowType
+from app.core.workspace import ensure_local_organization
+from app.models import Document
 from app.schemas.domain import DocumentRead
 
 CHUNK_SIZE = 1024 * 1024
@@ -39,6 +42,10 @@ def _format_for_filename(filename: str) -> FileFormat:
         raise InvalidDocumentError("Podržani formati su PDF, XLSX, CSV i EML.") from error
 
 
+def get_document_format(document: Document) -> FileFormat:
+    return _format_for_filename(document.original_filename)
+
+
 def _validate_signature(file_format: FileFormat, prefix: bytes) -> None:
     if file_format is FileFormat.PDF and not prefix.startswith(b"%PDF-"):
         raise InvalidDocumentError("Sadržaj fajla ne izgleda kao ispravan PDF.")
@@ -60,6 +67,7 @@ async def store_document(
     upload: UploadFile,
     document_type: DocumentType,
     workflow: WorkflowType | None,
+    session: AsyncSession,
 ) -> DocumentRead:
     if not upload.filename:
         raise InvalidDocumentError("Fajl nema naziv.")
@@ -93,6 +101,7 @@ async def store_document(
             raise InvalidDocumentError("Izabrani fajl je prazan.")
         _validate_signature(file_format, bytes(prefix))
 
+        now = datetime.now(timezone.utc)
         document = DocumentRead(
             id=document_id,
             document_type=document_type,
@@ -105,17 +114,35 @@ async def store_document(
             or mimetypes.guess_type(original_filename)[0]
             or "application/octet-stream",
             sha256=digest.hexdigest(),
-            created_at=datetime.now(timezone.utc),
+            created_at=now,
+            updated_at=now,
         )
 
         temporary_path.replace(content_path)
         temporary_metadata_path.write_text(document.model_dump_json(), encoding="utf-8")
         temporary_metadata_path.replace(metadata_path)
+
+        async with session.begin():
+            organization_id = await ensure_local_organization(session)
+            session.add(
+                Document(
+                    id=document_id,
+                    organization_id=organization_id,
+                    document_type=document_type,
+                    workflow=workflow,
+                    original_filename=original_filename,
+                    mime_type=document.mime_type,
+                    object_key=content_path.name,
+                    sha256=document.sha256,
+                    status=ProcessingStatus.UPLOADED,
+                )
+            )
         return document
     except Exception:
         temporary_path.unlink(missing_ok=True)
         content_path.unlink(missing_ok=True)
         temporary_metadata_path.unlink(missing_ok=True)
+        metadata_path.unlink(missing_ok=True)
         raise
     finally:
         await upload.close()

@@ -17,6 +17,9 @@ services:
 
   api:
     image: ai-inbox-to-quote-api:dev
+    env_file:
+      - path: ../services/api/.env
+        required: false
     build:
       context: ../services/api
       target: dev
@@ -47,6 +50,30 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    image: ai-inbox-to-quote-api:dev
+    env_file:
+      - path: ../services/api/.env
+        required: false
+    build:
+      context: ../services/api
+      target: dev
+    command: ["python", "-m", "app.jobs.worker"]
+    volumes:
+      - ../services/api:/srv/www
+      - document_files:/var/lib/ai-inbox-to-quote/documents
+    environment:
+      APP_NAME: AI Inbox-to-Quote API
+      ENVIRONMENT: local
+      LOCAL_ORGANIZATION_ID: 00000000-0000-4000-8000-000000000001
+      LOCAL_ORGANIZATION_NAME: Local development workspace
+      DATABASE_URL: postgresql+asyncpg://postgres:local_dev_only@postgres:5432/ai_inbox_to_quote
+      DOCUMENT_STORAGE_PATH: /var/lib/ai-inbox-to-quote/documents
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

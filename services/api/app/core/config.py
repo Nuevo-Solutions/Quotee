@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from uuid import UUID
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +23,9 @@ class Settings(BaseSettings):
     )
     document_storage_path: Path = Path(".data/documents")
     max_document_size_bytes: int = 20 * 1024 * 1024
+    openai_api_key: SecretStr | None = None
+    openai_model: str = "gpt-4.1-mini"
+    llm_job_max_tokens: int = 30_000
 
 
 @lru_cache

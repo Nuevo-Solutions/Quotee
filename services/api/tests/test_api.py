@@ -7,6 +7,7 @@ import pytest
 from app.db.base import Base
 from app.documents import storage
 from app.main import app
+from app.models import Document
 
 
 @pytest.mark.asyncio
@@ -21,7 +22,7 @@ async def test_health_endpoint() -> None:
 
 
 @pytest.mark.asyncio
-async def test_business_routes_are_documented_but_not_implemented() -> None:
+async def test_business_routes_are_documented_and_process_checks_document() -> None:
     document_id = "4c4f734a-23cc-4c1b-a0ce-045645f8f8e0"
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -29,7 +30,7 @@ async def test_business_routes_are_documented_but_not_implemented() -> None:
         response = await client.post(f"/api/v1/documents/{document_id}/process")
     paths = app.openapi()["paths"]
 
-    assert response.status_code == 501
+    assert response.status_code == 404
     assert "/api/v1/documents/{document_id}/process" in paths
     assert "/api/v1/documents/{document_id}/content" in paths
     assert "/api/v1/quotes/{quote_id}/approve" in paths
@@ -37,8 +38,9 @@ async def test_business_routes_are_documented_but_not_implemented() -> None:
 
 
 @pytest.mark.asyncio
-async def test_document_upload_list_and_content(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(storage, "get_storage_directory", lambda: tmp_path)
+async def test_document_upload_list_and_content(tmp_path, monkeypatch, test_db) -> None:
+    document_storage_path = tmp_path / "documents"
+    monkeypatch.setattr(storage, "get_storage_directory", lambda: document_storage_path)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -65,11 +67,16 @@ async def test_document_upload_list_and_content(tmp_path, monkeypatch) -> None:
     assert metadata.json()["id"] == document_id
     assert content.content == b"sku,name\nA-1,Cable\n"
     assert UUID(document_id)
+    async with test_db() as session:
+        stored_document = await session.get(Document, UUID(document_id))
+    assert stored_document is not None
+    assert stored_document.object_key.endswith(".csv")
 
 
 @pytest.mark.asyncio
-async def test_pdf_source_content_is_inline(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(storage, "get_storage_directory", lambda: tmp_path)
+async def test_pdf_source_content_is_inline(tmp_path, monkeypatch, test_db) -> None:
+    document_storage_path = tmp_path / "documents"
+    monkeypatch.setattr(storage, "get_storage_directory", lambda: document_storage_path)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -85,8 +92,11 @@ async def test_pdf_source_content_is_inline(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_document_upload_rejects_invalid_file_signature(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(storage, "get_storage_directory", lambda: tmp_path)
+async def test_document_upload_rejects_invalid_file_signature(
+    tmp_path, monkeypatch, test_db
+) -> None:
+    document_storage_path = tmp_path / "documents"
+    monkeypatch.setattr(storage, "get_storage_directory", lambda: document_storage_path)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -96,18 +106,19 @@ async def test_document_upload_rejects_invalid_file_signature(tmp_path, monkeypa
         )
 
     assert response.status_code == 400
-    assert list(tmp_path.iterdir()) == []
+    assert list(document_storage_path.iterdir()) == []
 
 
 @pytest.mark.asyncio
 async def test_document_upload_enforces_size_limit_and_cleans_temporary_file(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, test_db
 ) -> None:
+    document_storage_path = tmp_path / "documents"
     monkeypatch.setattr(
         storage,
         "get_settings",
         lambda: SimpleNamespace(
-            document_storage_path=tmp_path,
+            document_storage_path=document_storage_path,
             max_document_size_bytes=8,
         ),
     )
@@ -120,7 +131,7 @@ async def test_document_upload_enforces_size_limit_and_cleans_temporary_file(
         )
 
     assert response.status_code == 413
-    assert list(tmp_path.iterdir()) == []
+    assert list(document_storage_path.iterdir()) == []
 
 
 def test_domain_models_register_with_shared_metadata() -> None:

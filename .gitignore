@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+/services/api/.env
 
 # Dependencies
 node_modules/

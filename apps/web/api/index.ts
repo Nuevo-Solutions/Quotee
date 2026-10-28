@@ -56,11 +56,76 @@ export type StoredDocument = {
   workflow: DocumentWorkflow | null;
   original_filename: string;
   format: DocumentFormat;
-  status: "UPLOADED" | "PROCESSING" | "NEEDS_REVIEW" | "FAILED" | "UNSUPPORTED_INPUT";
+  status: "UPLOADED" | "PROCESSING" | "MAPPING_REQUIRED" | "NEEDS_REVIEW" | "FAILED" | "UNSUPPORTED_INPUT";
   size_bytes: number;
   mime_type: string;
   sha256: string;
   created_at: string;
+};
+
+export type ProcessingJob = {
+  id: string;
+  document_id: string;
+  job_type: DocumentWorkflow | null;
+  catalog_import_id: string | null;
+  status: StoredDocument["status"];
+  attempts: number;
+  error_code: string | null;
+  error_message: string | null;
+  result_count: number;
+  mapping_headers: string[] | null;
+  mapping_suggestion: ProductColumnMapping | null;
+  column_mapping: ProductColumnMapping | null;
+  llm_input_tokens: number;
+  llm_output_tokens: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type ProductColumnMapping = {
+  position: number | null;
+  sku: number | null;
+  description: number | null;
+  quantity: number | null;
+  unit: number | null;
+};
+
+export type MatchCandidate = {
+  product_id: string;
+  sku: string;
+  name: string;
+  unit: string;
+  price: string | null;
+  currency: string | null;
+  rank: number;
+  evidence: Record<string, unknown>;
+};
+
+export type DocumentPositionResult = {
+  id: string;
+  position_code: string | null;
+  sort_order: number;
+  raw_description: string;
+  original_quantity: string | null;
+  original_unit: string | null;
+  source_ref: Record<string, unknown> | null;
+  item_type: "PRODUCT" | "WORK" | "SERVICE" | "COMPOSITE";
+  review_status:
+    | "EXTRACTED"
+    | "EXACT_MATCH"
+    | "SUGGESTED_MATCH"
+    | "AMBIGUOUS"
+    | "UNMATCHED"
+    | "MISSING_PRICE"
+    | "INVALID_INPUT"
+    | "MANUALLY_CONFIRMED";
+  confidence: "HIGH" | "MEDIUM" | "LOW" | "NONE";
+  reason_codes: string[];
+  price_status: "NOT_CHECKED" | "AVAILABLE" | "MISSING_PRICE";
+  availability_status: "NOT_CHECKED" | "UNKNOWN";
+  selected_product_id: string | null;
+  candidates: MatchCandidate[];
 };
 
 export const MAX_DOCUMENT_SIZE_BYTES = 20 * 1024 * 1024;
@@ -213,6 +278,56 @@ export async function getDocument(documentId: string): Promise<StoredDocument> {
     cache: "no-store",
   });
   return readResponse<StoredDocument>(response);
+}
+
+export async function processDocument(documentId: string): Promise<ProcessingJob> {
+  const response = await fetch(`/api/documents/${encodeURIComponent(documentId)}/process`, {
+    method: "POST",
+    cache: "no-store",
+  });
+  return readResponse<ProcessingJob>(response);
+}
+
+export async function confirmDocumentMapping(
+  documentId: string,
+  jobId: string,
+  mapping: ProductColumnMapping,
+): Promise<ProcessingJob> {
+  const response = await fetch(
+    `/api/documents/${encodeURIComponent(documentId)}/jobs/${encodeURIComponent(jobId)}/mapping`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(mapping),
+      cache: "no-store",
+    },
+  );
+  return readResponse<ProcessingJob>(response);
+}
+
+export async function getLatestProcessingJob(documentId: string): Promise<ProcessingJob | null> {
+  const response = await fetch(
+    `/api/documents/${encodeURIComponent(documentId)}/jobs`,
+    { cache: "no-store" },
+  );
+  return readResponse<ProcessingJob | null>(response);
+}
+
+export async function getProcessingJob(jobId: string): Promise<ProcessingJob> {
+  const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
+  return readResponse<ProcessingJob>(response);
+}
+
+export async function getDocumentPositions(
+  documentId: string,
+  jobId: string,
+): Promise<DocumentPositionResult[]> {
+  const query = new URLSearchParams({ job_id: jobId });
+  const response = await fetch(
+    `/api/documents/${encodeURIComponent(documentId)}/positions?${query}`,
+    { cache: "no-store" },
+  );
+  return readResponse<DocumentPositionResult[]>(response);
 }
 
 export async function uploadDocument(

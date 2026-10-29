@@ -1,6 +1,7 @@
 import re
 import unicodedata
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from difflib import SequenceMatcher
 from uuid import UUID
 
@@ -20,10 +21,12 @@ MAX_CANDIDATES = 5
 TRIGRAM_THRESHOLD = 0.18
 AUTO_SUGGEST_THRESHOLD = 0.45
 MIN_CANDIDATE_GAP = 0.10
-SPEC_PATTERN = re.compile(
-    r"\b(?:[abc]\s*\d+|\d+(?:[.,]\d+)?\s*[x×]\s*\d+(?:[.,]\d+)?(?:\s*mm2?)?|\d+\s*[pP])\b",
-    re.IGNORECASE,
+CABLE_SIZE_PATTERN = re.compile(
+    r"(?<![\w.])(\d+)\s*[x×]\s*(\d+(?:[.,]\d+)?)(?![\d.])", re.IGNORECASE
 )
+BREAKER_PATTERN = re.compile(r"(?<![A-Z0-9])([ABC])\s*(\d+)(?!\d)", re.IGNORECASE)
+POLE_PATTERN = re.compile(r"(?<!\d)(\d+)\s*[pP](?![A-Z])", re.IGNORECASE)
+VOLTAGE_PATTERN = re.compile(r"(?<!\d)(\d+(?:[.,]\d+)?)\s*[vV](?![A-Z])", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -53,22 +56,47 @@ def normalize_match_text(value: str) -> str:
     return " ".join(without_marks.replace("×", "x").split())
 
 
-def _specification_tokens(value: str) -> set[str]:
-    return {
-        re.sub(r"\s+", "", token.replace(",", ".").lower()).replace("×", "x")
-        for token in SPEC_PATTERN.findall(value)
+def _decimal_token(value: str) -> str:
+    try:
+        normalized = Decimal(value.replace(",", ".")).normalize()
+    except InvalidOperation:
+        return value.replace(",", ".")
+    return format(normalized, "f")
+
+
+def _specification_attributes(value: str) -> dict[str, set[str]]:
+    attributes: dict[str, set[str]] = {}
+    cable_sizes = {
+        f"{int(cores)}x{_decimal_token(section)}"
+        for cores, section in CABLE_SIZE_PATTERN.findall(value)
     }
+    breakers = {
+        f"{curve.upper()}{int(current)}" for curve, current in BREAKER_PATTERN.findall(value)
+    }
+    poles = {f"{int(count)}P" for count in POLE_PATTERN.findall(value)}
+    voltages = {f"{_decimal_token(voltage)}V" for voltage in VOLTAGE_PATTERN.findall(value)}
+    for name, tokens in (
+        ("cable_size", cable_sizes),
+        ("breaker", breakers),
+        ("poles", poles),
+        ("voltage", voltages),
+    ):
+        if tokens:
+            attributes[name] = tokens
+    return attributes
 
 
 def _specification_issue(requested: str, candidate: str) -> str | None:
-    requested_specs = _specification_tokens(requested)
-    candidate_specs = _specification_tokens(candidate)
-    if not requested_specs:
+    requested_attributes = _specification_attributes(requested)
+    candidate_attributes = _specification_attributes(candidate)
+    if not requested_attributes:
         return None
-    if not candidate_specs:
-        return "SPECIFICATION_UNKNOWN"
-    if requested_specs != candidate_specs:
-        return "SPECIFICATION_CONFLICT"
+    for name, requested_values in requested_attributes.items():
+        candidate_values = candidate_attributes.get(name)
+        if candidate_values is None:
+            return "SPECIFICATION_UNKNOWN"
+        if requested_values != candidate_values:
+            return "SPECIFICATION_CONFLICT"
     return None
 
 
@@ -100,6 +128,30 @@ def candidate_constraint_issues(line: ParsedProductLine, product: Product) -> li
     ):
         issues.append("UNIT_MISMATCH")
     return issues
+
+
+def prioritize_compatible_candidates(
+    line: ParsedProductLine,
+    candidates: list[RankedCandidate],
+) -> list[RankedCandidate]:
+    issues_by_candidate = {
+        candidate.product.id: candidate_constraint_issues(line, candidate.product)
+        for candidate in candidates
+    }
+    compatible = [
+        candidate for candidate in candidates if not issues_by_candidate[candidate.product.id]
+    ]
+    if compatible:
+        return compatible
+    explicit_conflicts = [
+        candidate
+        for candidate in candidates
+        if any(
+            issue in {"SPECIFICATION_CONFLICT", "UNIT_MISMATCH"}
+            for issue in issues_by_candidate[candidate.product.id]
+        )
+    ]
+    return explicit_conflicts or candidates
 
 
 async def _rank_candidates(
@@ -168,9 +220,9 @@ async def _rank_candidates(
         alias_scores = (
             select(
                 ProductAlias.product_id.label("product_id"),
-                func.max(
-                    func.similarity(ProductAlias.alias, line.raw_description)
-                ).label("alias_score"),
+                func.max(func.similarity(ProductAlias.alias, line.raw_description)).label(
+                    "alias_score"
+                ),
             )
             .where(
                 ProductAlias.organization_id == organization_id,
@@ -241,13 +293,13 @@ async def match_product_line(
     catalog_import_id: UUID,
     line: ParsedProductLine,
 ) -> MatchDecision:
-    candidates = await _rank_candidates(
+    ranked_candidates = await _rank_candidates(
         session,
         organization_id=organization_id,
         catalog_import_id=catalog_import_id,
         line=line,
     )
-    if not candidates:
+    if not ranked_candidates:
         return MatchDecision(
             status=ReviewStatus.UNMATCHED,
             confidence=ConfidenceLevel.NONE,
@@ -257,6 +309,7 @@ async def match_product_line(
             price_status=PriceStatus.NOT_CHECKED,
         )
 
+    candidates = prioritize_compatible_candidates(line, ranked_candidates)
     top_candidates = candidates[:MAX_CANDIDATES]
     top = top_candidates[0]
     exact_candidate = top.method in {"EXACT_SKU", "EXACT_ALIAS", "EXACT_NAME"}

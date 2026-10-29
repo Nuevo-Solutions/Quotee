@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -90,6 +90,8 @@ class JobRead(BaseModel):
     mapping_headers: list[str] | None
     mapping_suggestion: dict[str, int | None] | None
     column_mapping: dict[str, int | None] | None
+    mapping_sheet_name: str | None
+    mapping_header_row: int | None
     llm_input_tokens: int
     llm_output_tokens: int
     created_at: datetime
@@ -115,6 +117,9 @@ class PositionMatchResultRead(BaseModel):
     raw_description: str
     original_quantity: Decimal | None
     original_unit: str | None
+    extraction_status: Literal["PARSED", "PARTIAL"]
+    quantity_status: Literal["VALID", "MISSING", "INVALID"]
+    unit_status: Literal["EXPLICIT", "CATALOG_SUGGESTED", "CONFLICT", "MISSING"]
     source_ref: dict[str, Any] | None
     item_type: ItemType
     review_status: ReviewStatus

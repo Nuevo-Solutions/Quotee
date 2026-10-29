@@ -533,7 +533,15 @@ export function DocumentObjectPage({ documentId }: DocumentObjectPageProps) {
                             <small>{[sourceSheet, typeof sourceRow === "number" ? `red ${sourceRow}` : null].filter(Boolean).join(" · ") || "Izvorni dokument"}</small>
                           </td>
                           <td>{result.raw_description}</td>
-                          <td>{result.original_quantity ?? "—"} {result.original_unit ?? ""}</td>
+                          <td>
+                            {result.original_quantity ?? "—"} {result.original_unit ?? ""}
+                            {result.quantity_status !== "VALID" && (
+                              <small>{result.quantity_status === "MISSING" ? "Nedostaje količina" : "Količina nije validna"}</small>
+                            )}
+                            {result.unit_status !== "EXPLICIT" && (
+                              <small>{result.unit_status === "MISSING" ? "Nedostaje jedinica mere" : result.unit_status === "CONFLICT" ? "Jedinica se razlikuje" : "Jedinica predložena iz kataloga"}</small>
+                            )}
+                          </td>
                           <td>
                             {candidate ? (
                               <>

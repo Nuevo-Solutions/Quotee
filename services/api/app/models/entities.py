@@ -219,6 +219,8 @@ class ProcessingJob(UUIDPrimaryKey, TimestampMixin, Base):
     mapping_headers: Mapped[list[str] | None] = mapped_column(JSON)
     mapping_suggestion: Mapped[dict[str, int | None] | None] = mapped_column(JSON)
     column_mapping: Mapped[dict[str, int | None] | None] = mapped_column(JSON)
+    mapping_sheet_name: Mapped[str | None] = mapped_column(String(255))
+    mapping_header_row: Mapped[int | None] = mapped_column(Integer)
     llm_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     llm_output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -73,6 +73,20 @@ async def list_document_positions(
 
     output: list[PositionMatchResultRead] = []
     for result, position in result_rows:
+        quantity_status = (
+            "INVALID"
+            if "INVALID_QUANTITY" in position.flags
+            else "MISSING"
+            if "MISSING_QUANTITY" in position.flags
+            else "VALID"
+        )
+        unit_status = (
+            "CONFLICT"
+            if "UNIT_MISMATCH" in result.reason_codes
+            else "MISSING"
+            if "MISSING_UNIT" in position.flags
+            else "EXPLICIT"
+        )
         candidates = (
             await session.execute(
                 select(MatchCandidate, Product)
@@ -92,6 +106,9 @@ async def list_document_positions(
                 raw_description=position.raw_description,
                 original_quantity=position.original_quantity,
                 original_unit=position.original_unit,
+                extraction_status="PARTIAL" if position.flags else "PARSED",
+                quantity_status=quantity_status,
+                unit_status=unit_status,
                 source_ref=position.source_ref,
                 item_type=position.item_type,
                 review_status=result.match_status,

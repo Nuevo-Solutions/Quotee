@@ -33,13 +33,11 @@ export async function POST(request: Request) {
   if (file.size > MAX_FILE_BYTES) {
     return Response.json({ detail: "Katalog fajl je veći od dozvoljenih 20 MB." }, { status: 413 });
   }
-  if (typeof mapping !== "string" || !mapping) {
-    return Response.json({ detail: "Mapiranje kolona nije priloženo." }, { status: 400 });
-  }
-
   const forwardedForm = new FormData();
   forwardedForm.set("file", file, file.name);
-  forwardedForm.set("mapping", mapping);
+  if (typeof mapping === "string" && mapping.trim()) {
+    forwardedForm.set("mapping", mapping);
+  }
   const sheetName = formData.get("sheet_name");
   if (typeof sheetName === "string" && sheetName) forwardedForm.set("sheet_name", sheetName);
 

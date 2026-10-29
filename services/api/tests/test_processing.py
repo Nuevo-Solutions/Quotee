@@ -1,14 +1,18 @@
 import json
+from io import BytesIO
 from types import SimpleNamespace
 from uuid import UUID
 
 import httpx
 import pytest
+from openpyxl import Workbook
 
 from app import models  # noqa: F401
 from app.core.enums import AvailabilityStatus, ProcessingStatus, ReviewStatus
 from app.documents import storage
+from app.documents.layout import normalize_header
 from app.documents.product_parser import (
+    ParsedProductLine,
     ProductColumnMappingRequiredError,
     parse_product_document,
 )
@@ -16,6 +20,11 @@ from app.jobs import processor
 from app.llm.client import LLMTokenUsage
 from app.llm.schemas import ProductCandidateDecision, ProductColumnMapping
 from app.main import app
+from app.matching.service import (
+    RankedCandidate,
+    _specification_issue,
+    prioritize_compatible_candidates,
+)
 from app.models import ProcessingJob
 
 
@@ -27,8 +36,8 @@ def test_processing_job_timestamps_are_timezone_aware() -> None:
 def test_column_mapping_allows_selection_through_tenth_column() -> None:
     document_id = UUID("00000000-0000-4000-8000-000000000123")
     file_bytes = (
-        b"Intro,Section,Notes\n"
-        b",,context,,,wire,m,SKU-10,Test product,5\n"
+        b"Intro,Section,Notes,Col4,Col5,Col6,Col7,Col8,Col9,Col10\n"
+        b",,,,context,wire,m,SKU-10,Test product,5\n"
     )
 
     with pytest.raises(ProductColumnMappingRequiredError) as error:
@@ -40,7 +49,7 @@ def test_column_mapping_allows_selection_through_tenth_column() -> None:
 
     assert len(error.value.headers) == 10
     assert error.value.headers[:3] == ["Intro", "Section", "Notes"]
-    assert error.value.headers[9] == ""
+    assert error.value.headers[9] == "Col10"
 
     lines, _ = parse_product_document(
         document_id=document_id,
@@ -53,6 +62,36 @@ def test_column_mapping_allows_selection_through_tenth_column() -> None:
     assert lines[0].raw_description == "Test product"
     assert str(lines[0].quantity) == "5"
     assert lines[0].unit == "m"
+
+
+def test_header_normalization_supports_serbian_cyrillic_and_punctuation() -> None:
+    assert normalize_header("Р. бр.") == "rbr"
+    assert normalize_header("Шифра") == "sifra"
+    assert normalize_header("Назив производа") == "nazivproizvoda"
+    assert normalize_header("Јед. мере") == "jedmere"
+
+
+def test_equivalent_cable_cross_section_not_marked_as_conflict() -> None:
+    assert _specification_issue("Kabl PP-Y 3x2.5 mm²", "Kabl PP-Y 3x2.5 mm2") is None
+    assert _specification_issue("Kabl PP-Y 3x2.5 mm²", "Kabl PP-Y 3x1.5 mm2") == (
+        "SPECIFICATION_CONFLICT"
+    )
+
+
+def test_conflicting_top_candidate_does_not_hide_compatible_candidate() -> None:
+    line = ParsedProductLine(None, "Kabl PP-Y 3x2.5 mm²", None, "m", None, {}, [])
+    conflicting = RankedCandidate(
+        SimpleNamespace(id="conflict", name="Kabl PP-Y 3x1.5 mm2", unit="m"),
+        0.9,
+        "TRIGRAM",
+    )
+    compatible = RankedCandidate(
+        SimpleNamespace(id="compatible", name="Kabl PP-Y 3x2.5 mm2", unit="m"),
+        0.8,
+        "TRIGRAM",
+    )
+
+    assert prioritize_compatible_candidates(line, [conflicting, compatible]) == [compatible]
 
 
 @pytest.mark.asyncio
@@ -165,9 +204,7 @@ async def test_product_processing_persists_reviewable_results(
             f"/api/v1/documents/{document_id}/positions",
             params={"job_id": job["id"]},
         )
-        latest_job_response = await client.get(
-            f"/api/v1/documents/{document_id}/jobs/latest"
-        )
+        latest_job_response = await client.get(f"/api/v1/documents/{document_id}/jobs/latest")
         retry_response = await client.post(f"/api/v1/documents/{document_id}/process")
 
     assert job_response.status_code == 200
@@ -185,8 +222,9 @@ async def test_product_processing_persists_reviewable_results(
     assert results[0]["source_ref"]["row"] == 2
     assert results[1]["review_status"] == ReviewStatus.AMBIGUOUS.value
     assert "UNIT_MISMATCH" in results[1]["reason_codes"]
-    assert results[2]["review_status"] == ReviewStatus.INVALID_INPUT.value
-    assert results[2]["reason_codes"] == ["MISSING_QUANTITY"]
+    assert results[2]["review_status"] == ReviewStatus.EXACT_MATCH.value
+    assert results[2]["reason_codes"] == ["EXACT_SKU", "UNIT_REVIEW_REQUIRED", "MISSING_QUANTITY"]
+    assert results[2]["quantity_status"] == "MISSING"
     assert results[2]["source_ref"]["row"] == 4
     assert results[3]["review_status"] == ReviewStatus.AMBIGUOUS.value
     assert "SPECIFICATION_CONFLICT" in results[3]["reason_codes"]
@@ -197,6 +235,7 @@ async def test_product_processing_persists_reviewable_results(
     assert "LLM_MATCH_SUGGESTION" in results[4]["reason_codes"]
     assert results[5]["review_status"] == ReviewStatus.INVALID_INPUT.value
     assert results[5]["reason_codes"] == ["MISSING_DESCRIPTION"]
+    assert results[5]["extraction_status"] == "PARTIAL"
     assert results[5]["source_ref"]["row"] == 7
     assert results[6]["review_status"] == ReviewStatus.AMBIGUOUS.value
     assert "SPECIFICATION_UNKNOWN" in results[6]["reason_codes"]
@@ -207,7 +246,136 @@ async def test_product_processing_persists_reviewable_results(
 
 
 @pytest.mark.asyncio
-async def test_llm_column_mapping_waits_for_confirmation_then_resumes_job(
+async def test_title_rows_request_extracts_eight_exact_skus_without_llm(
+    tmp_path,
+    monkeypatch,
+    test_db,
+) -> None:
+    document_storage_path = tmp_path / "documents"
+    monkeypatch.setattr(storage, "get_storage_directory", lambda: document_storage_path)
+    monkeypatch.setattr(
+        processor,
+        "get_settings",
+        lambda: SimpleNamespace(
+            local_organization_id=UUID("00000000-0000-4000-8000-000000000001"),
+            document_storage_path=document_storage_path,
+            llm_job_max_tokens=30_000,
+        ),
+    )
+
+    class NoCallLLM:
+        job_budget = SimpleNamespace(input_tokens=0, output_tokens=0)
+
+        async def resolve_product_candidate(self, **_kwargs):
+            raise AssertionError("Exact SKU rows must not call the matching model.")
+
+        async def suggest_column_mapping(self, **_kwargs):
+            raise AssertionError("Rule-detected header must not call the mapping model.")
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(processor, "create_llm_client", lambda *_args, **_kwargs: NoCallLLM())
+    products = [
+        ("CAB-3X25", "Kabl PP-Y 3x2.5 mm2", "m", "185"),
+        ("CAB-3X15", "Kabl PP-Y 3x1.5 mm2", "m", "160"),
+        ("BRK-B16-1P", "Automatski osigurač B16 1P", "kom", "42"),
+        ("BOX-24M", "Razvodni orman 24M", "kom", "900"),
+        ("SOC-SCH-W", "Utičnica Schuko bela", "kom", "120"),
+        ("SW-1P-W", "Prekidač 1P bela", "kom", "80"),
+        ("LED-PNL-36W", "LED panel 36W", "kom", "1450"),
+        ("TIE-200-100", "Vezica 200x100", "pak", "230"),
+    ]
+    catalog_csv = (
+        "sku,name,unit,price,currency,vat_rate,active\n"
+        + "".join(
+            f"{sku},{name},{unit},{price},RSD,20,true\n" for sku, name, unit, price in products
+        )
+    ).encode()
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Zahtev za ponudu"
+    for row_index in range(1, 11):
+        sheet.append(["Podaci o kupcu"] if row_index == 10 else [])
+    sheet.append([])
+    sheet.append(["R. br.", "Šifra", "Naziv proizvoda", "Količina", "Jedinica"])
+    quantities = [300, 200, 24, 2, 40, 20, 12, 5]
+    for index, ((sku, name, unit, _price), quantity) in enumerate(
+        zip(products, quantities, strict=True),
+        start=1,
+    ):
+        sheet.append([index, sku, name.replace("mm2", "mm²"), quantity, unit])
+    sheet.append([])
+    sheet.append([None, "Napomena o kontaktu"])
+    sheet.append([None, "Rok isporuke"])
+    content = BytesIO()
+    workbook.save(content)
+    workbook.close()
+    request_xlsx = content.getvalue()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        catalog = await client.post(
+            "/api/v1/catalog/imports",
+            data={
+                "mapping": json.dumps(
+                    {
+                        "sku": 0,
+                        "name": 1,
+                        "unit": 2,
+                        "price": 3,
+                        "currency": 4,
+                        "vat_rate": 5,
+                        "active": 6,
+                    }
+                )
+            },
+            files={"file": ("catalog.csv", catalog_csv, "text/csv")},
+        )
+        upload = await client.post(
+            "/api/v1/documents",
+            data={"document_type": "INQUIRY", "workflow": "PRODUCT_QUOTE"},
+            files={
+                "file": (
+                    "zahtev.xlsx",
+                    request_xlsx,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        document_id = upload.json()["id"]
+        enqueue = await client.post(f"/api/v1/documents/{document_id}/process")
+
+    assert catalog.status_code == 201
+    assert catalog.json()["products_imported"] == 8
+    assert upload.status_code == 201
+    assert enqueue.status_code == 202
+    job_id = enqueue.json()["id"]
+    await processor.process_next_job(test_db, UUID(job_id))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        job = await client.get(f"/api/v1/jobs/{job_id}")
+        result_response = await client.get(
+            f"/api/v1/documents/{document_id}/positions", params={"job_id": job_id}
+        )
+
+    results = result_response.json()
+    assert job.json()["status"] == ProcessingStatus.NEEDS_REVIEW.value
+    assert job.json()["result_count"] == 8
+    assert job.json()["llm_input_tokens"] == 0
+    assert len(results) == 8
+    assert [result["source_ref"]["row"] for result in results] == list(range(13, 21))
+    assert [result["review_status"] for result in results] == [ReviewStatus.EXACT_MATCH.value] * 8
+    assert [result["quantity_status"] for result in results] == ["VALID"] * 8
+    assert [result["unit_status"] for result in results] == ["EXPLICIT"] * 8
+
+
+@pytest.mark.asyncio
+async def test_llm_column_mapping_is_validated_and_resumes_automatically(
     tmp_path,
     monkeypatch,
     test_db,
@@ -292,10 +460,9 @@ async def test_llm_column_mapping_waits_for_confirmation_then_resumes_job(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        waiting_job = await client.get(f"/api/v1/jobs/{job_id}")
-        confirm = await client.post(
-            f"/api/v1/documents/{document_id}/jobs/{job_id}/mapping",
-            json={"position": None, "sku": 0, "description": 1, "quantity": 2, "unit": 3},
+        completed_job = await client.get(f"/api/v1/jobs/{job_id}")
+        results = await client.get(
+            f"/api/v1/documents/{document_id}/positions", params={"job_id": job_id}
         )
 
     assert fake_llm.received_headers[:4] == [
@@ -307,26 +474,12 @@ async def test_llm_column_mapping_waits_for_confirmation_then_resumes_job(
     assert len(fake_llm.received_headers) == 10
     assert fake_llm.received_headers[4:] == [""] * 6
     assert fake_llm.received_rows == [["A-1", "Blue Cable", "3", "m"]]
-    assert waiting_job.json()["status"] == ProcessingStatus.MAPPING_REQUIRED.value
-    assert waiting_job.json()["mapping_suggestion"]["sku"] == 0
-    assert waiting_job.json()["llm_input_tokens"] == 80
-    assert waiting_job.json()["llm_output_tokens"] == 20
-    assert confirm.status_code == 202
-    assert confirm.json()["id"] == job_id
-    assert confirm.json()["status"] == ProcessingStatus.UPLOADED.value
-
-    await processor.process_next_job(test_db, UUID(job_id))
-
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        completed_job = await client.get(f"/api/v1/jobs/{job_id}")
-        results = await client.get(
-            f"/api/v1/documents/{document_id}/positions", params={"job_id": job_id}
-        )
-
     assert completed_job.json()["status"] == ProcessingStatus.NEEDS_REVIEW.value
     assert completed_job.json()["result_count"] == 1
+    assert completed_job.json()["column_mapping"]["sku"] == 0
+    assert completed_job.json()["llm_input_tokens"] == 80
+    assert completed_job.json()["llm_output_tokens"] == 20
+    assert len(results.json()) == 1
     assert results.json()[0]["review_status"] == ReviewStatus.EXACT_MATCH.value
     assert fake_llm.received_headers[:4] == [
         "Artikelcode",

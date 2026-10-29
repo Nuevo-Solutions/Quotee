@@ -56,6 +56,7 @@ async def persist_catalog_import(
                 price=item.price,
                 currency=item.currency,
                 vat_rate=item.vat_rate,
+                active=item.active,
             )
             for item in products
         ]

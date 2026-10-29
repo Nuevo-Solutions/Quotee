@@ -16,6 +16,7 @@ class CatalogColumnMapping(BaseModel):
     currency: int | None = Field(default=None, ge=0)
     vat_rate: int | None = Field(default=None, ge=0)
     aliases: int | None = Field(default=None, ge=0)
+    active: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def mapping_uses_distinct_columns(self) -> "CatalogColumnMapping":
@@ -36,6 +37,7 @@ class CatalogProductInput(BaseModel):
         StringConstraints(strip_whitespace=True, min_length=3, max_length=3),
     ] | None = None
     vat_rate: Decimal | None = Field(default=None, ge=0, le=100, max_digits=7, decimal_places=4)
+    active: bool = True
     aliases: list[Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]] = Field(
         default_factory=list,
         max_length=50,

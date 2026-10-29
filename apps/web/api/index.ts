@@ -3,7 +3,7 @@ import Papa from "papaparse";
 export type DocumentWorkflow = "PRODUCT_QUOTE" | "TECHNICAL_QUOTE";
 export type DocumentType = "INQUIRY" | "PRODUCT_LIST" | "BOQ" | "OTHER";
 export type DocumentFormat = "PDF" | "XLSX" | "CSV" | "EML";
-export type CatalogField = "sku" | "name" | "unit" | "price" | "currency" | "vat_rate" | "aliases";
+export type CatalogField = "sku" | "name" | "unit" | "price" | "currency" | "vat_rate" | "aliases" | "active";
 
 export type ParsedCatalogSheet = {
   name: string;
@@ -48,6 +48,7 @@ export const CATALOG_FIELD_OPTIONS: {
   { value: "currency", label: "Valuta", required: false },
   { value: "vat_rate", label: "PDV stopa", required: false },
   { value: "aliases", label: "Alternativni nazivi", required: false },
+  { value: "active", label: "Aktivan", required: false },
 ];
 
 export type StoredDocument = {
@@ -109,6 +110,9 @@ export type DocumentPositionResult = {
   raw_description: string;
   original_quantity: string | null;
   original_unit: string | null;
+  extraction_status: "PARSED" | "PARTIAL";
+  quantity_status: "VALID" | "MISSING" | "INVALID";
+  unit_status: "EXPLICIT" | "CATALOG_SUGGESTED" | "CONFLICT" | "MISSING";
   source_ref: Record<string, unknown> | null;
   item_type: "PRODUCT" | "WORK" | "SERVICE" | "COMPOSITE";
   review_status:
@@ -138,6 +142,7 @@ const CATALOG_FIELD_ALIASES: Record<CatalogField, string[]> = {
   currency: ["currency", "valuta", "curr"],
   vat_rate: ["vatrate", "pdv", "pdvstopa", "stopapdv", "vat", "tax"],
   aliases: ["alias", "aliasi", "alternativninaziv", "alternativninazivi"],
+  active: ["active", "aktivan", "aktivno", "status"],
 };
 
 function normalizeCatalogHeader(header: string) {
@@ -201,6 +206,7 @@ export function suggestCatalogColumnMapping(headers: string[]): CatalogColumnMap
     currency: "",
     vat_rate: "",
     aliases: "",
+    active: "",
   };
 
   for (const field of CATALOG_FIELD_OPTIONS) {
@@ -354,15 +360,17 @@ export async function listCatalogImports(): Promise<CatalogImportSummary[]> {
 
 export async function importCatalogFile(
   file: File,
-  mapping: CatalogColumnMapping,
+  mapping?: CatalogColumnMapping,
   sheetName?: string,
 ): Promise<CatalogImport> {
   const formData = new FormData();
   formData.set("file", file, file.name);
-  const normalizedMapping = Object.fromEntries(
-    Object.entries(mapping).map(([field, column]) => [field, column === "" ? null : Number(column)]),
-  );
-  formData.set("mapping", JSON.stringify(normalizedMapping));
+  if (mapping) {
+    const normalizedMapping = Object.fromEntries(
+      Object.entries(mapping).map(([field, column]) => [field, column === "" ? null : Number(column)]),
+    );
+    formData.set("mapping", JSON.stringify(normalizedMapping));
+  }
   if (sheetName) formData.set("sheet_name", sheetName);
 
   const response = await fetch("/api/catalog/imports", {

@@ -101,6 +101,7 @@ export function DataSourcesPage() {
   const [parsedSheets, setParsedSheets] = useState<ParsedCatalogSheet[]>([]);
   const [activeSheetIndex, setActiveSheetIndex] = useState(0);
   const [columnMapping, setColumnMapping] = useState<CatalogColumnMapping | null>(null);
+  const [useManualMapping, setUseManualMapping] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [imports, setImports] = useState<CatalogImportSummary[]>([]);
   const [importsLoading, setImportsLoading] = useState(true);
@@ -155,6 +156,7 @@ export function DataSourcesPage() {
     setSelectedCatalog(file);
     setParsedSheets([]);
     setColumnMapping(null);
+    setUseManualMapping(false);
     setActiveSheetIndex(0);
     setFileError("");
     setSelectionNotice("");
@@ -179,17 +181,22 @@ export function DataSourcesPage() {
 
   function selectSheet(index: number) {
     setActiveSheetIndex(index);
+    setUseManualMapping(true);
     const sheet = parsedSheets[index];
     if (sheet) setColumnMapping(suggestCatalogColumnMapping(sheet.headers));
   }
 
   function updateColumnMapping(field: CatalogField, value: string) {
+    setUseManualMapping(true);
     setColumnMapping((current) => current ? { ...current, [field]: value } : current);
   }
 
   async function handleCatalogImport() {
-    if (!selectedCatalog || !activeSheet || !columnMapping || missingRequiredFields.length > 0) return;
+    if (!selectedCatalog || !activeSheet) return;
 
+    const confirmedMapping = useManualMapping && columnMapping && missingRequiredFields.length === 0
+      ? columnMapping
+      : undefined;
     setIsImporting(true);
     setFileError("");
     setImportError("");
@@ -198,8 +205,10 @@ export function DataSourcesPage() {
     try {
       imported = await importCatalogFile(
         selectedCatalog,
-        columnMapping,
-        selectedCatalog.name.toLowerCase().endsWith(".xlsx") ? activeSheet.name : undefined,
+        confirmedMapping,
+        confirmedMapping && selectedCatalog.name.toLowerCase().endsWith(".xlsx")
+          ? activeSheet.name
+          : undefined,
       );
     } catch (error) {
       setFileError(error instanceof Error ? error.message : "Uvoz kataloga nije uspeo.");
@@ -304,17 +313,17 @@ export function DataSourcesPage() {
               {activeSheet && columnMapping && missingRequiredFields.length === 0 && (
                 <div className="catalog-inline-message" role="status">
                   <CheckCircle2 aria-hidden="true" size={15} />
-                  Mapirane su obavezne kolone: {activeSheet.rowCount} proizvoda spremno za validaciju.
+                  Lokalni predlog je spreman; API će nezavisno prepoznati strukturu kataloga.
                 </div>
               )}
 
               <Button
                 className="catalog-import-button"
-                disabled={!selectedCatalog || !activeSheet || !columnMapping || missingRequiredFields.length > 0 || activeSheet.rowCount === 0 || isImporting}
+                disabled={!selectedCatalog || !activeSheet || isImporting}
                 onClick={handleCatalogImport}
                 type="button"
               >
-                {isImporting ? "Validiram i uvozim…" : "Validiraj i uvezi katalog"}
+                {isImporting ? "Prepoznajem i uvozim…" : "Automatski prepoznaj i uvezi"}
               </Button>
             </section>
 
@@ -328,21 +337,23 @@ export function DataSourcesPage() {
               </div>
               <dl className="catalog-fields-list">
                 <div><dt>Obavezno</dt><dd>SKU · naziv · jedinica mere</dd></div>
-                <div><dt>Opcionalno</dt><dd>Cena · valuta · PDV stopa</dd></div>
+                <div><dt>Opcionalno</dt><dd>Cena · valuta · PDV stopa · aktivan status</dd></div>
                 <div><dt>Alternativni nazivi</dt><dd>Podržani kroz zasebne alias zapise</dd></div>
                 <div><dt>Verzionisanje</dt><dd>Svaki uvoz pripada verziji kataloga</dd></div>
               </dl>
-              <span className="catalog-schema-link">SKU, naziv i jedinica mere moraju biti mapirani pre budućeg uvoza.</span>
+              <span className="catalog-schema-link">API automatski prepoznaje kolone; ručna izmena je dostupna po potrebi.</span>
             </section>
           </div>
 
           {activeSheet && columnMapping && (
-            <section aria-labelledby="catalog-mapping-title" className="catalog-mapping-section">
+            <details className="catalog-mapping-details">
+              <summary>Napredno mapiranje kolona i izbor radnog lista</summary>
+              <section aria-labelledby="catalog-mapping-title" className="catalog-mapping-section">
               <div className="catalog-mapping-heading">
                 <div>
-                  <span className="object-section-kicker">Korak 2</span>
+                  <span className="object-section-kicker">Opcionalno</span>
                   <h2 id="catalog-mapping-title">Mapiranje kolona</h2>
-                  <p>{activeSheet.rowCount} redova podataka · automatski predlog možeš da promeniš.</p>
+                  <p>{activeSheet.rowCount} lokalno parsiranih redova · ovo mapiranje važi samo ako ga potvrdiš.</p>
                 </div>
                 {parsedSheets.length > 1 && (
                   <label className="catalog-sheet-field">
@@ -386,20 +397,21 @@ export function DataSourcesPage() {
               </div>
               <div className="catalog-mapping-preview-wrap">
                 <table className="catalog-mapping-preview-table">
-                  <thead><tr><th>SKU</th><th>Naziv</th><th>Jedinica mere</th><th>Cena</th><th>Valuta</th><th>PDV</th><th>Aliasi</th></tr></thead>
+                  <thead><tr><th>SKU</th><th>Naziv</th><th>Jedinica mere</th><th>Cena</th><th>Valuta</th><th>PDV</th><th>Aliasi</th><th>Aktivan</th></tr></thead>
                   <tbody>
                     {mappedPreviewRows.length > 0 ? mappedPreviewRows.map((row, index) => (
                       <tr key={index}>
                         <td>{row.sku || "—"}</td><td>{row.name || "—"}</td><td>{row.unit || "—"}</td>
-                        <td>{row.price || "—"}</td><td>{row.currency || "—"}</td><td>{row.vat_rate || "—"}</td><td>{row.aliases || "—"}</td>
+                        <td>{row.price || "—"}</td><td>{row.currency || "—"}</td><td>{row.vat_rate || "—"}</td><td>{row.aliases || "—"}</td><td>{row.active || "—"}</td>
                       </tr>
                     )) : (
-                      <tr><td className="catalog-preview-empty" colSpan={7}>Nema redova za pregled.</td></tr>
+                      <tr><td className="catalog-preview-empty" colSpan={8}>Nema redova za pregled.</td></tr>
                     )}
                   </tbody>
                 </table>
               </div>
-            </section>
+              </section>
+            </details>
           )}
 
           <section aria-labelledby="catalog-import-history-title" className="catalog-history-section">

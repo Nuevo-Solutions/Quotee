@@ -128,6 +128,8 @@ async def _mark_job_mapping_required(
     *,
     headers: list[str],
     suggestion: dict[str, int | None] | None,
+    sheet_name: str | None,
+    header_row: int,
     token_budget: LLMJobBudget,
 ) -> None:
     async with session_factory() as session:
@@ -141,6 +143,8 @@ async def _mark_job_mapping_required(
             job.error_message = "Potvrdite mapiranje kolona pre nastavka obrade."
             job.mapping_headers = headers
             job.mapping_suggestion = suggestion
+            job.mapping_sheet_name = sheet_name
+            job.mapping_header_row = header_row
             job.llm_input_tokens = token_budget.input_tokens
             job.llm_output_tokens = token_budget.output_tokens
             job.finished_at = datetime.now(timezone.utc)
@@ -167,6 +171,9 @@ async def _write_processing_results(
     job_id: UUID,
     lines: list[ParsedProductLine],
     llm_client: OpenAILLM | None,
+    column_mapping: dict[str, int | None] | None = None,
+    mapping_sheet_name: str | None = None,
+        mapping_header_row: int | None = None,
 ) -> None:
     settings = get_settings()
     async with session_factory() as session:
@@ -217,17 +224,7 @@ async def _write_processing_results(
             await session.flush()
 
             for position, line in zip(positions_to_write, lines, strict=True):
-                invalid_input = any(
-                    flag
-                    in {
-                        "INVALID_QUANTITY",
-                        "MISSING_QUANTITY",
-                        "MISSING_UNIT",
-                        "MISSING_DESCRIPTION",
-                    }
-                    for flag in line.flags
-                )
-                if invalid_input:
+                if not line.raw_description.strip() and not line.source_sku:
                     decision_status = ReviewStatus.INVALID_INPUT
                     confidence = ConfidenceLevel.NONE
                     reason_codes = list(line.flags)
@@ -251,6 +248,7 @@ async def _write_processing_results(
                         else None
                     )
                     price_status = decision.price_status
+                    reason_codes = list(dict.fromkeys([*reason_codes, *line.flags]))
                     has_hard_conflict = any(
                         reason
                         in {
@@ -367,6 +365,10 @@ async def _write_processing_results(
             job.status = ProcessingStatus.NEEDS_REVIEW
             job.result_count = len(lines)
             job.finished_at = datetime.now(timezone.utc)
+            if column_mapping is not None:
+                job.column_mapping = column_mapping
+                job.mapping_sheet_name = mapping_sheet_name
+                job.mapping_header_row = mapping_header_row
             if llm_client is not None:
                 job.llm_input_tokens = llm_client.job_budget.input_tokens
                 job.llm_output_tokens = llm_client.job_budget.output_tokens
@@ -388,6 +390,8 @@ async def process_job(
         document_id = document.id
         filename = document.original_filename
         column_mapping = job.column_mapping
+        mapping_sheet_name = job.mapping_sheet_name
+        mapping_header_row = job.mapping_header_row
         token_budget = LLMJobBudget(
             settings.llm_job_max_tokens,
             input_tokens=job.llm_input_tokens,
@@ -402,6 +406,8 @@ async def process_job(
                 filename=filename,
                 file_bytes=file_bytes,
                 column_mapping=column_mapping,
+                sheet_name=mapping_sheet_name,
+                header_row=mapping_header_row,
             )
         except ProductColumnMappingRequiredError as error:
             suggestion = None
@@ -414,11 +420,36 @@ async def process_job(
                     suggestion = _validated_mapping_suggestion(mapped, error.headers)
                 except LLMInputLimitError:
                     logger.info("LLM mapping request exceeded its token budget for job %s", job_id)
+            if suggestion is not None:
+                try:
+                    lines, _ = parse_product_document(
+                        document_id=document_id,
+                        filename=filename,
+                        file_bytes=file_bytes,
+                        column_mapping=suggestion,
+                        sheet_name=error.sheet_name,
+                        header_row=error.header_row,
+                    )
+                except UnsupportedProductDocumentError:
+                    suggestion = None
+                else:
+                    await _write_processing_results(
+                        session_factory,
+                        job_id=job_id,
+                        lines=lines,
+                        llm_client=llm_client,
+                        column_mapping=suggestion,
+                        mapping_sheet_name=error.sheet_name,
+                        mapping_header_row=error.header_row,
+                    )
+                    return True
             await _mark_job_mapping_required(
                 session_factory,
                 job_id,
                 headers=error.headers,
                 suggestion=suggestion,
+                sheet_name=error.sheet_name,
+                header_row=error.header_row,
                 token_budget=token_budget,
             )
             return True

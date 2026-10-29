@@ -437,6 +437,8 @@
 .catalog-inline-message--error { color: #a3414d; }
 .catalog-import-button { width: 100%; margin-top: 13px; }
 .catalog-import-button:disabled { cursor: not-allowed; opacity: 0.55; }
+.catalog-mapping-details { margin-top: 15px; }
+.catalog-mapping-details > summary { width: fit-content; color: #527286; cursor: pointer; font-size: 10px; }
 .catalog-fields-list { margin: 0; }
 .catalog-fields-list > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid #edf1f3; }
 .catalog-fields-list dt { color: #7e919e; font-size: 9px; font-weight: 650; }
@@ -470,7 +472,7 @@
 .catalog-preview-heading h3 { margin: 0; color: #3a5b70; font-size: 10px; font-weight: 700; }
 .catalog-preview-heading > span { color: #8597a3; font-size: 8px; }
 .catalog-mapping-preview-wrap { max-width: 100%; overflow-x: auto; border: 1px solid #e4eaee; border-radius: 7px; }
-.catalog-mapping-preview-table { width: 100%; min-width: 700px; border-collapse: collapse; color: #456277; font-size: 9px; }
+.catalog-mapping-preview-table { width: 100%; min-width: 800px; border-collapse: collapse; color: #456277; font-size: 9px; }
 .catalog-mapping-preview-table th { height: 32px; padding: 0 9px; border-bottom: 1px solid #e4eaee; color: #738a99; background: #f7f9fa; font-size: 8px; font-weight: 700; text-align: left; white-space: nowrap; }
 .catalog-mapping-preview-table td { max-width: 220px; padding: 8px 9px; border-bottom: 1px solid #edf1f3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .catalog-mapping-preview-table tbody tr:last-child td { border-bottom: 0; }

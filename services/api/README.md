@@ -53,13 +53,12 @@ schema manually or create tables from application startup.
 
 ## Catalog import
 
-`POST /api/v1/catalog/imports` accepts multipart fields `file`, `mapping` (JSON string of
-source-column indexes), and optional `sheet_name` for XLSX. Required mapped fields are `sku`,
-`name`, and `unit`; optional fields are `price`, `currency`, `vat_rate`, and `aliases`. The API
-re-parses and validates the original file, creates a versioned `CatalogImport`, and inserts
-`Product` and `ProductAlias` rows in one transaction. `GET /api/v1/catalog/imports` lists versions;
-`GET /api/v1/catalog/products` lists products from the latest import or a selected
-`catalog_import_id`.
+`POST /api/v1/catalog/imports` accepts `file`; `mapping` (JSON string of source-column indexes)
+and `sheet_name` are optional advanced overrides. By default the backend finds the data-bearing
+worksheet and header row, validates SKU/name/unit cells, and imports active status when present.
+The API creates a versioned `CatalogImport` and inserts `Product` and `ProductAlias` rows in one
+transaction. `GET /api/v1/catalog/imports` lists versions; `GET /api/v1/catalog/products` lists
+products from the latest import or a selected `catalog_import_id`.
 
 For this local-only stage, imports are assigned to `LOCAL_ORGANIZATION_ID` from server settings,
 not from browser input. The original catalog file is not retained; only its SHA-256 checksum and
@@ -69,21 +68,23 @@ synthetic files only. XLSX formulas/macros are not executed; cached formula valu
 ## Product document processing
 
 `POST /api/v1/documents/{document_id}/process` creates or reuses a processing job pinned to the
-latest catalog import. The worker parses CSV/XLSX rows, preserves source row references, and stores
-exact matches, suggestions, ambiguous candidates, unmatched rows, and invalid input for review.
-Poll `GET /api/v1/jobs/{job_id}` and load `GET /api/v1/documents/{document_id}/positions?job_id=...`.
+latest catalog import. The worker scans CSV/XLSX sheets for data-backed headers and table rows,
+preserves source coordinates, and stores matches and partial-input states separately. Poll
+`GET /api/v1/jobs/{job_id}` and load
+`GET /api/v1/documents/{document_id}/positions?job_id=...`.
 
 LLM support is optional. Set `OPENAI_API_KEY` in `services/api/.env`; Compose passes it to both the
 API and worker. `OPENAI_MODEL` defaults to `gpt-4.1-mini` and `LLM_JOB_MAX_TOKENS` defaults to
 `30000`. Without a key, processing remains deterministic.
 
-When CSV/XLSX headers are not recognized, the worker can ask the model to suggest a column map
-using the headers and at most five sample rows. The job waits in `MAPPING_REQUIRED` until a user
-confirms or changes the suggestion. For unresolved product matching, the model sees the request
-and at most five candidates already retrieved from the pinned catalog. The backend validates its
-candidate ID and rechecks units/specifications; a model match remains a human-review suggestion.
-Prices, inventory, and organization data are not sent to the model. Price data shown to the user is
-only the imported catalog value, and availability remains `UNKNOWN` because no inventory service
-is configured.
+Rules handle recognized CSV/XLSX layouts without an LLM call. If rules cannot find a valid header,
+the worker can ask the model for a bounded column suggestion and trial-parse it. Manual column
+confirmation is requested only if that parse cannot be validated. Catalog import also detects the
+data-bearing sheet/header automatically; mapping and sheet selection are optional overrides. For
+unresolved product matching, the model sees the request and at most five candidates already
+retrieved from the pinned catalog. The backend checks candidate specifications/units before
+truncation, validates the selected ID, and keeps any model match as a human-review suggestion.
+Missing quantities do not block product identity. Prices, inventory, and organization data are not
+sent to the model. Availability remains `UNKNOWN` because no inventory service is configured.
 
 The worker and API must share the same database and document storage volume.
